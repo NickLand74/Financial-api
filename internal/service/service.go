@@ -8,19 +8,20 @@ import (
 )
 
 type Service struct {
-	repo repository.Repository // <-- Используем интерфейс, а не *Repository
+	repo repository.Repository
 }
 
 func NewService(repo repository.Repository) *Service {
 	return &Service{repo: repo}
 }
 
+// TopUpBalance добавляет amount к балансу пользователя, записывает транзакцию "topup"
 func (s *Service) TopUpBalance(ctx context.Context, userID int, amount float64) error {
 	if amount <= 0 {
 		return fmt.Errorf("amount must be positive")
 	}
 
-	tx, err := s.repo.Pool().Begin(ctx)
+	tx, err := s.repo.BeginTx(ctx)
 	if err != nil {
 		return err
 	}
@@ -49,9 +50,11 @@ func (s *Service) TopUpBalance(ctx context.Context, userID int, amount float64) 
 	if commitErr := tx.Commit(ctx); commitErr != nil {
 		return commitErr
 	}
+
 	return nil
 }
 
+// TransferMoney переводит amount от fromUser к toUser
 func (s *Service) TransferMoney(ctx context.Context, fromUserID, toUserID int, amount float64) error {
 	if amount <= 0 {
 		return fmt.Errorf("amount must be positive")
@@ -60,7 +63,7 @@ func (s *Service) TransferMoney(ctx context.Context, fromUserID, toUserID int, a
 		return fmt.Errorf("cannot transfer to the same user")
 	}
 
-	tx, err := s.repo.Pool().Begin(ctx)
+	tx, err := s.repo.BeginTx(ctx)
 	if err != nil {
 		return err
 	}
@@ -83,19 +86,17 @@ func (s *Service) TransferMoney(ctx context.Context, fromUserID, toUserID int, a
 		return fmt.Errorf("insufficient funds for user %d", fromUserID)
 	}
 
-	fromNew := fromUser.Balance - amount
-	toNew := toUser.Balance + amount
-
-	err = s.repo.UpdateUserBalanceTx(ctx, tx, fromUserID, fromNew)
-	if err != nil {
-		return err
-	}
-	err = s.repo.UpdateUserBalanceTx(ctx, tx, toUserID, toNew)
+	err = s.repo.UpdateUserBalanceTx(ctx, tx, fromUserID, fromUser.Balance-amount)
 	if err != nil {
 		return err
 	}
 
-	// Записываем 2 транзакции (минус и плюс):
+	err = s.repo.UpdateUserBalanceTx(ctx, tx, toUserID, toUser.Balance+amount)
+	if err != nil {
+		return err
+	}
+
+	// Запишем две транзакции: -amount у fromUser, +amount у toUser
 	err = s.repo.CreateTransactionTx(ctx, tx, fromUserID, -amount, "transfer")
 	if err != nil {
 		return err
@@ -108,9 +109,11 @@ func (s *Service) TransferMoney(ctx context.Context, fromUserID, toUserID int, a
 	if commitErr := tx.Commit(ctx); commitErr != nil {
 		return commitErr
 	}
+
 	return nil
 }
 
+// GetLastTransactions возвращает последние 10 транзакций пользователя userID
 func (s *Service) GetLastTransactions(ctx context.Context, userID int) ([]entity.Transaction, error) {
 	return s.repo.GetLastTransactions(ctx, userID)
 }

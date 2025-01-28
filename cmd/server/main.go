@@ -24,7 +24,8 @@ func main() {
 	}
 	defer pool.Close()
 
-	repo := repository.NewRepository(pool)
+	// Используем PgRepository (реализацию интерфейса)
+	repo := repository.NewPgRepository(pool)
 	svc := service.NewService(repo)
 	h := handler.NewHandler(svc)
 
