@@ -8,8 +8,6 @@ import (
 	"github.com/jackc/pgx/v4/pgxpool"
 )
 
-// Repository — это интерфейс, который сервис может вызывать.
-// И PgRepository (реальная реализация), и моки в тестах будут его реализовывать.
 type Repository interface {
 	BeginTx(ctx context.Context) (pgx.Tx, error)
 
@@ -20,7 +18,6 @@ type Repository interface {
 	GetLastTransactions(ctx context.Context, userID int) ([]entity.Transaction, error)
 }
 
-// PgRepository — реальная реализация Repository, использующая *pgxpool.Pool
 type PgRepository struct {
 	pool *pgxpool.Pool
 }
@@ -29,15 +26,14 @@ func NewPgRepository(pool *pgxpool.Pool) *PgRepository {
 	return &PgRepository{pool: pool}
 }
 
-// BeginTx — начинаем транзакцию через pgxpool.Pool
 func (r *PgRepository) BeginTx(ctx context.Context) (pgx.Tx, error) {
 	return r.pool.Begin(ctx)
 }
 
-// GetUserByIDTx — получаем пользователя в рамках транзакции
 func (r *PgRepository) GetUserByIDTx(ctx context.Context, tx pgx.Tx, userID int) (*entity.User, error) {
 	var u entity.User
-	err := tx.QueryRow(ctx, `SELECT id, balance FROM users WHERE id = $1`, userID).Scan(&u.ID, &u.Balance)
+	err := tx.QueryRow(ctx, "SELECT id, balance FROM users WHERE id = $1", userID).
+		Scan(&u.ID, &u.Balance)
 	if err != nil {
 		return nil, err
 	}
@@ -45,15 +41,15 @@ func (r *PgRepository) GetUserByIDTx(ctx context.Context, tx pgx.Tx, userID int)
 }
 
 func (r *PgRepository) UpdateUserBalanceTx(ctx context.Context, tx pgx.Tx, userID int, newBalance float64) error {
-	_, err := tx.Exec(ctx, `UPDATE users SET balance = $1 WHERE id = $2`, newBalance, userID)
+	_, err := tx.Exec(ctx, "UPDATE users SET balance = $1 WHERE id = $2", newBalance, userID)
 	return err
 }
 
 func (r *PgRepository) CreateTransactionTx(ctx context.Context, tx pgx.Tx, userID int, amount float64, ttype string) error {
-	_, err := tx.Exec(ctx, `
-		INSERT INTO transactions (user_id, amount, type)
-		VALUES ($1, $2, $3)
-	`, userID, amount, ttype)
+	_, err := tx.Exec(ctx,
+		`INSERT INTO transactions (user_id, amount, type)
+		 VALUES ($1, $2, $3)`,
+		userID, amount, ttype)
 	return err
 }
 
@@ -81,6 +77,5 @@ func (r *PgRepository) GetLastTransactions(ctx context.Context, userID int) ([]e
 	if err = rows.Err(); err != nil {
 		return nil, err
 	}
-
 	return result, nil
 }
