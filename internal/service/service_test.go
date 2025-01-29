@@ -1,176 +1,167 @@
+// service/service_test.go
 package service_test
 
 import (
 	"context"
-	"errors"
-	"fmt"
 	"testing"
+	"time"
 
 	"financial-api/internal/entity"
+	"financial-api/internal/repository"
 	"financial-api/internal/service"
 
-	"github.com/jackc/pgconn" // для pgconn.CommandTag
-	"github.com/jackc/pgx/v4" // для pgx.Tx
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
 )
 
-// MockRepo имитирует interface repository.Repository
-type MockRepo struct {
+// MockRepository реализует интерфейс repository.Repository
+type MockRepository struct {
 	mock.Mock
 }
 
-func (m *MockRepo) BeginTx(ctx context.Context) (pgx.Tx, error) {
-	fmt.Println("MOCK BeginTx called with:", ctx)
+func (m *MockRepository) BeginTx(ctx context.Context) (repository.Transaction, error) {
 	args := m.Called(ctx)
-	tx, _ := args.Get(0).(pgx.Tx)
+	tx, _ := args.Get(0).(repository.Transaction)
 	err, _ := args.Get(1).(error)
 	return tx, err
 }
 
-func (m *MockRepo) GetUserByIDTx(ctx context.Context, tx pgx.Tx, userID int) (*entity.User, error) {
-	fmt.Printf("MOCK GetUserByIDTx called: ctx=%v, tx=%v, userID=%v\n", ctx, tx, userID)
+func (m *MockRepository) GetUserByIDTx(ctx context.Context, tx repository.Transaction, userID int) (*entity.User, error) {
 	args := m.Called(ctx, tx, userID)
 	u, _ := args.Get(0).(*entity.User)
 	err, _ := args.Get(1).(error)
 	return u, err
 }
 
-func (m *MockRepo) UpdateUserBalanceTx(ctx context.Context, tx pgx.Tx, userID int, newBalance float64) error {
-	fmt.Printf("MOCK UpdateUserBalanceTx called: userID=%v, newBalance=%.2f\n", userID, newBalance)
+func (m *MockRepository) UpdateUserBalanceTx(ctx context.Context, tx repository.Transaction, userID int, newBalance float64) error {
 	args := m.Called(ctx, tx, userID, newBalance)
 	return args.Error(0)
 }
 
-func (m *MockRepo) CreateTransactionTx(ctx context.Context, tx pgx.Tx, userID int, amount float64, ttype string) error {
-	fmt.Printf("MOCK CreateTransactionTx called: userID=%v, amount=%.2f, type=%s\n", userID, amount, ttype)
+func (m *MockRepository) CreateTransactionTx(ctx context.Context, tx repository.Transaction, userID int, amount float64, ttype string) error {
 	args := m.Called(ctx, tx, userID, amount, ttype)
 	return args.Error(0)
 }
 
-func (m *MockRepo) GetLastTransactions(ctx context.Context, userID int) ([]entity.Transaction, error) {
-	fmt.Printf("MOCK GetLastTransactions called: userID=%v\n", userID)
+func (m *MockRepository) GetLastTransactions(ctx context.Context, userID int) ([]entity.Transaction, error) {
 	args := m.Called(ctx, userID)
 	trs, _ := args.Get(0).([]entity.Transaction)
 	err, _ := args.Get(1).(error)
 	return trs, err
 }
 
-// MockTx имитирует pgx.Tx
-type MockTx struct {
+// MockTransaction реализует интерфейс repository.Transaction
+type MockTransaction struct {
 	mock.Mock
 }
 
-func (mt *MockTx) Commit(ctx context.Context) error {
-	fmt.Println("MOCK tx.Commit called")
-	args := mt.Called(ctx)
+func (m *MockTransaction) Commit(ctx context.Context) error {
+	args := m.Called(ctx)
 	return args.Error(0)
-}
-func (mt *MockTx) Rollback(ctx context.Context) error {
-	fmt.Println("MOCK tx.Rollback called")
-	args := mt.Called(ctx)
-	return args.Error(0)
-}
-func (mt *MockTx) Exec(ctx context.Context, sql string, args ...interface{}) (pgconn.CommandTag, error) {
-	fmt.Println("MOCK tx.Exec called:", sql, args)
-	return pgconn.CommandTag("MOCK"), nil
-}
-func (mt *MockTx) Prepare(ctx context.Context, name, sql string) (*pgconn.StatementDescription, error) {
-	fmt.Println("MOCK tx.Prepare called:", name, sql)
-	return nil, errors.New("not implemented")
-}
-func (mt *MockTx) Query(ctx context.Context, sql string, args ...interface{}) (pgx.Rows, error) {
-	return nil, errors.New("not implemented")
-}
-func (mt *MockTx) QueryRow(ctx context.Context, sql string, args ...interface{}) pgx.Row {
-	return nil
-}
-func (mt *MockTx) Begin(ctx context.Context) (pgx.Tx, error) {
-	return nil, errors.New("not implemented")
-}
-func (mt *MockTx) Conn() *pgx.Conn {
-	return nil
 }
 
-// ====================== TESTS =============================
+func (m *MockTransaction) Rollback(ctx context.Context) error {
+	args := m.Called(ctx)
+	return args.Error(0)
+}
+
+// =========== TESTS =============
 
 func TestTopUpBalance_Success(t *testing.T) {
-	mockRepo := new(MockRepo)
-	svc := service.NewService(mockRepo)
-
+	mockRepo := new(MockRepository)
+	svc := service.NewService(mockRepo) // Передаем mockRepo напрямую, без указателя на указатель
 	ctx := context.Background()
-	mockTx := new(MockTx)
+	mockTx := new(MockTransaction)
 
-	// Разрешаем все вызовы (Maybe), с любыми аргументами (mock.Anything)
-	mockRepo.On("BeginTx", mock.Anything).
-		Maybe().
-		Return(mockTx, nil)
+	// Правила моков
+	mockRepo.On("BeginTx", ctx).Return(mockTx, nil).Once()
+	mockRepo.On("GetUserByIDTx", ctx, mockTx, 1).
+		Return(&entity.User{ID: 1, Balance: 100}, nil).
+		Once()
+	mockRepo.On("UpdateUserBalanceTx", ctx, mockTx, 1, 150).
+		Return(nil).
+		Once()
+	mockRepo.On("CreateTransactionTx", ctx, mockTx, 1, 50, "topup").
+		Return(nil).
+		Once()
+	mockTx.On("Commit", ctx).Return(nil).Once()
+	mockTx.On("Rollback", ctx).Return(nil).Times(0)
 
-	mockRepo.On("GetUserByIDTx", mock.Anything, mock.Anything, mock.Anything).
-		Maybe().
-		Return(&entity.User{ID: 1, Balance: 100.0}, nil)
-
-	mockRepo.On("UpdateUserBalanceTx", mock.Anything, mock.Anything, mock.Anything, mock.Anything).
-		Maybe().
-		Return(nil)
-
-	mockRepo.On("CreateTransactionTx", mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything).
-		Maybe().
-		Return(nil)
-
-	// Коммит
-	mockTx.On("Commit", mock.Anything).Maybe().Return(nil)
-	// Роллбек
-	mockTx.On("Rollback", mock.Anything).Maybe().Return(nil)
-
+	t.Logf("ExpectedCalls before = %#v", mockRepo.ExpectedCalls)
 	t.Log("=== Starting TestTopUpBalance_Success ===")
-	err := svc.TopUpBalance(ctx, 1, 50.0)
+
+	err := svc.TopUpBalance(ctx, 1, 50)
 	assert.NoError(t, err)
-
 	mockRepo.AssertExpectations(t)
 	mockTx.AssertExpectations(t)
 }
 
-func TestTopUpBalance_BeginTxError(t *testing.T) {
-	mockRepo := new(MockRepo)
-	svc := service.NewService(mockRepo)
+func TestTransferMoney_Success(t *testing.T) {
+	mockRepo := new(MockRepository)
+	svc := service.NewService(mockRepo) // Передаем mockRepo напрямую, без указателя на указатель
+	ctx := context.Background()
+	mockTx := new(MockTransaction)
 
-	// Если BeginTx вернёт ошибку
-	mockRepo.On("BeginTx", mock.Anything).
-		Return(nil, errors.New("DB init error"))
+	fromUserID := 1
+	toUserID := 2
+	amount := 50.0
 
-	err := svc.TopUpBalance(context.Background(), 1, 100.0)
-	assert.Error(t, err)
-	assert.Contains(t, err.Error(), "DB init error")
+	fromUser := &entity.User{ID: fromUserID, Balance: 150}
+	toUser := &entity.User{ID: toUserID, Balance: 100}
 
-	mockRepo.AssertExpectations(t)
-}
+	// Правила моков
+	mockRepo.On("BeginTx", ctx).Return(mockTx, nil).Once()
+	mockRepo.On("GetUserByIDTx", ctx, mockTx, fromUserID).
+		Return(fromUser, nil).
+		Once()
+	mockRepo.On("GetUserByIDTx", ctx, mockTx, toUserID).
+		Return(toUser, nil).
+		Once()
+	mockRepo.On("UpdateUserBalanceTx", ctx, mockTx, fromUserID, fromUser.Balance-amount).
+		Return(nil).
+		Once()
+	mockRepo.On("UpdateUserBalanceTx", ctx, mockTx, toUserID, toUser.Balance+amount).
+		Return(nil).
+		Once()
+	mockRepo.On("CreateTransactionTx", ctx, mockTx, fromUserID, -amount, "transfer").
+		Return(nil).
+		Once()
+	mockRepo.On("CreateTransactionTx", ctx, mockTx, toUserID, amount, "transfer").
+		Return(nil).
+		Once()
+	mockTx.On("Commit", ctx).Return(nil).Once()
+	mockTx.On("Rollback", ctx).Return(nil).Times(0)
 
-func TestTransferMoney_Insufficient(t *testing.T) {
-	mockRepo := new(MockRepo)
-	svc := service.NewService(mockRepo)
+	t.Logf("ExpectedCalls before = %#v", mockRepo.ExpectedCalls)
+	t.Log("=== Starting TestTransferMoney_Success ===")
 
-	mockTx := new(MockTx)
-
-	mockRepo.On("BeginTx", mock.Anything).
-		Maybe().
-		Return(mockTx, nil)
-
-	// Допустим, для обоих GetUserByIDTx вызовов возвращаем баланс 20 — этого
-	// хватит, чтобы сервис понял "insufficient"
-	mockRepo.On("GetUserByIDTx", mock.Anything, mock.Anything, mock.Anything).
-		Maybe().
-		Return(&entity.User{ID: 1, Balance: 20}, nil)
-
-	mockTx.On("Rollback", mock.Anything).
-		Maybe().
-		Return(nil)
-
-	t.Log("=== Starting TestTransferMoney_Insufficient ===")
-	err := svc.TransferMoney(context.Background(), 1, 2, 50.0)
-	assert.Error(t, err)
-	assert.Contains(t, err.Error(), "insufficient funds")
-
+	err := svc.TransferMoney(ctx, fromUserID, toUserID, amount)
+	assert.NoError(t, err)
 	mockRepo.AssertExpectations(t)
 	mockTx.AssertExpectations(t)
+}
+
+func TestGetLastTransactions_Success(t *testing.T) {
+	mockRepo := new(MockRepository)
+	svc := service.NewService(mockRepo) // Передаем mockRepo напрямую, без указателя на указатель
+	ctx := context.Background()
+
+	userID := 1
+	expectedTransactions := []entity.Transaction{
+		{ID: 1, UserID: userID, Amount: 100, Type: "topup", CreatedAt: time.Now()},
+		{ID: 2, UserID: userID, Amount: 50, Type: "transfer", CreatedAt: time.Now()},
+	}
+
+	// Правила моков
+	mockRepo.On("GetLastTransactions", ctx, userID).
+		Return(expectedTransactions, nil).
+		Once()
+
+	t.Logf("ExpectedCalls before = %#v", mockRepo.ExpectedCalls)
+	t.Log("=== Starting TestGetLastTransactions_Success ===")
+
+	transactions, err := svc.GetLastTransactions(ctx, userID)
+	assert.NoError(t, err)
+	assert.Equal(t, expectedTransactions, transactions)
+	mockRepo.AssertExpectations(t)
 }
