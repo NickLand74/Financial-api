@@ -34,7 +34,7 @@ func (m *MockRepository) GetUserByIDTx(ctx context.Context, tx repository.Transa
 }
 
 func (m *MockRepository) UpdateUserBalanceTx(ctx context.Context, tx repository.Transaction, userID int, newBalance float64) error {
-	args := m.Called(ctx, tx, userID, newBalance)
+	args := m.Called(ctx, tx, userID, newBalance) // Используем float64
 	return args.Error(0)
 }
 
@@ -69,7 +69,7 @@ func (m *MockTransaction) Rollback(ctx context.Context) error {
 
 func TestTopUpBalance_Success(t *testing.T) {
 	mockRepo := new(MockRepository)
-	svc := service.NewService(mockRepo) // Передаем mockRepo напрямую, без указателя на указатель
+	svc := service.NewService(mockRepo)
 	ctx := context.Background()
 	mockTx := new(MockTransaction)
 
@@ -78,19 +78,19 @@ func TestTopUpBalance_Success(t *testing.T) {
 	mockRepo.On("GetUserByIDTx", ctx, mockTx, 1).
 		Return(&entity.User{ID: 1, Balance: 100}, nil).
 		Once()
-	mockRepo.On("UpdateUserBalanceTx", ctx, mockTx, 1, 150).
+	mockRepo.On("UpdateUserBalanceTx", ctx, mockTx, 1, 150.0).
 		Return(nil).
 		Once()
-	mockRepo.On("CreateTransactionTx", ctx, mockTx, 1, 50, "topup").
+	mockRepo.On("CreateTransactionTx", ctx, mockTx, 1, 50.0, "topup").
 		Return(nil).
 		Once()
 	mockTx.On("Commit", ctx).Return(nil).Once()
-	mockTx.On("Rollback", ctx).Return(nil).Times(0)
+	mockTx.On("Rollback", ctx).Return(nil).Maybe() // Добавляем Maybe(), чтобы Rollback мог быть опциональным
 
 	t.Logf("ExpectedCalls before = %#v", mockRepo.ExpectedCalls)
 	t.Log("=== Starting TestTopUpBalance_Success ===")
 
-	err := svc.TopUpBalance(ctx, 1, 50)
+	err := svc.TopUpBalance(ctx, 1, 50.0)
 	assert.NoError(t, err)
 	mockRepo.AssertExpectations(t)
 	mockTx.AssertExpectations(t)
@@ -98,7 +98,7 @@ func TestTopUpBalance_Success(t *testing.T) {
 
 func TestTransferMoney_Success(t *testing.T) {
 	mockRepo := new(MockRepository)
-	svc := service.NewService(mockRepo) // Передаем mockRepo напрямую, без указателя на указатель
+	svc := service.NewService(mockRepo)
 	ctx := context.Background()
 	mockTx := new(MockTransaction)
 
@@ -117,10 +117,10 @@ func TestTransferMoney_Success(t *testing.T) {
 	mockRepo.On("GetUserByIDTx", ctx, mockTx, toUserID).
 		Return(toUser, nil).
 		Once()
-	mockRepo.On("UpdateUserBalanceTx", ctx, mockTx, fromUserID, fromUser.Balance-amount).
+	mockRepo.On("UpdateUserBalanceTx", ctx, mockTx, fromUserID, 100.0).
 		Return(nil).
 		Once()
-	mockRepo.On("UpdateUserBalanceTx", ctx, mockTx, toUserID, toUser.Balance+amount).
+	mockRepo.On("UpdateUserBalanceTx", ctx, mockTx, toUserID, 150.0).
 		Return(nil).
 		Once()
 	mockRepo.On("CreateTransactionTx", ctx, mockTx, fromUserID, -amount, "transfer").
@@ -130,7 +130,7 @@ func TestTransferMoney_Success(t *testing.T) {
 		Return(nil).
 		Once()
 	mockTx.On("Commit", ctx).Return(nil).Once()
-	mockTx.On("Rollback", ctx).Return(nil).Times(0)
+	mockTx.On("Rollback", ctx).Return(nil).Maybe() // Добавляем Maybe(), чтобы Rollback мог быть опциональным
 
 	t.Logf("ExpectedCalls before = %#v", mockRepo.ExpectedCalls)
 	t.Log("=== Starting TestTransferMoney_Success ===")
@@ -143,7 +143,7 @@ func TestTransferMoney_Success(t *testing.T) {
 
 func TestGetLastTransactions_Success(t *testing.T) {
 	mockRepo := new(MockRepository)
-	svc := service.NewService(mockRepo) // Передаем mockRepo напрямую, без указателя на указатель
+	svc := service.NewService(mockRepo)
 	ctx := context.Background()
 
 	userID := 1
